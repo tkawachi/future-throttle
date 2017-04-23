@@ -10,17 +10,23 @@ trait Throttle {
   def throttle[A](f: => Future[A]): Future[A]
 }
 
-case class ThrottleRate(n: Int, span: FiniteDuration)
+case class ThrottleRate(n: Int, span: FiniteDuration) {
+  require(span.toMillis > 0,
+          "span must be equal or greater than 1 milli second")
+  require(n > 0, "n must be greater than 0")
+}
 
-class ThrottleImpl(rate: ThrottleRate, clock: Clock, timer: Timer) extends Throttle {
+class ThrottleImpl(rate: ThrottleRate, clock: Clock, timer: Timer)
+    extends Throttle {
   private val finishedTimes = new mutable.Queue[Long]
   private var inFlight = 0
   private val pendingJobs = new mutable.Queue[Runnable]
+  private var isScheduled = false
 
   override def throttle[A](f: => Future[A]): Future[A] = synchronized {
     val now = clock.millis()
     removePastTimes(now)
-    if (finishedTimes.length + inFlight < rate.n) {
+    if (canStart) {
       // run now
       startFuture(f)
     } else {
@@ -33,21 +39,35 @@ class ThrottleImpl(rate: ThrottleRate, clock: Clock, timer: Timer) extends Throt
         }
       }
       pendingJobs.enqueue(runnable)
-
-      scheduleStart(now)
-
+      if (!isScheduled) {
+        scheduleStart(now)
+      }
       promise.future
     }
   }
 
+  private def canStart = synchronized {
+    finishedTimes.length + inFlight < rate.n
+  }
+
   private def scheduleStart[A](now: Long) = synchronized {
-    timer.schedule(new TimerTask {
-      override def run(): Unit = startNextPendingJobs()
-    }, finishedTimes.headOption.map(_ + rate.span.toMillis - now).getOrElse(0L))
+    finishedTimes.headOption.foreach { oldestFinishedTime =>
+      val scheduleTime = oldestFinishedTime + rate.span.toMillis
+      timer.schedule(new TimerTask {
+        override def run(): Unit = onScheduledTask()
+      }, scheduleTime - now)
+      isScheduled = true
+    }
+  }
+
+  private def onScheduledTask(): Unit = synchronized {
+    isScheduled = false
+    startNextPendingJobs()
   }
 
   private def startFuture[A](f: => Future[A]): Future[A] = synchronized {
     inFlight += 1
+
     val result = f
     result.onComplete(_ => handleCompletion())
     result
@@ -67,10 +87,10 @@ class ThrottleImpl(rate: ThrottleRate, clock: Clock, timer: Timer) extends Throt
   private def startNextPendingJobs(): Unit = synchronized {
     val now = clock.millis()
     removePastTimes(now)
-    while (pendingJobs.nonEmpty && finishedTimes.length + inFlight < rate.n) {
+    while (pendingJobs.nonEmpty && canStart) {
       pendingJobs.dequeue().run()
     }
-    if (pendingJobs.nonEmpty) {
+    if (pendingJobs.nonEmpty && !isScheduled) {
       scheduleStart(now)
     }
   }
