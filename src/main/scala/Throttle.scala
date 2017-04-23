@@ -1,10 +1,10 @@
 import java.time.Clock
+import java.util.concurrent.Executor
 import java.util.{Timer, TimerTask}
 
 import scala.collection.mutable
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.ExecutionContext.Implicits.global // TODO
 
 trait Throttle {
   def throttle[A](f: => Future[A]): Future[A]
@@ -18,6 +18,12 @@ case class ThrottleRate(n: Int, span: FiniteDuration) {
 
 class ThrottleImpl(rate: ThrottleRate, clock: Clock, timer: Timer)
     extends Throttle {
+
+  private val ec: ExecutionContext =
+    ExecutionContext.fromExecutor(new Executor {
+      override def execute(command: Runnable): Unit = command.run()
+    })
+
   private val finishedTimes = new mutable.Queue[Long]
   private var inFlight = 0
   private val pendingJobs = new mutable.Queue[Runnable]
@@ -70,7 +76,7 @@ class ThrottleImpl(rate: ThrottleRate, clock: Clock, timer: Timer)
     inFlight += 1
 
     val result = f
-    result.onComplete(_ => handleCompletion())
+    result.onComplete(_ => handleCompletion())(ec)
     result
   }
 
