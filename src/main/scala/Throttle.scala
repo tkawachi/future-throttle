@@ -19,16 +19,16 @@ case class ThrottleRate(n: Int, span: FiniteDuration) {
 class ThrottleImpl(rate: ThrottleRate, clock: Clock, timer: Timer)
     extends Throttle {
 
-  private val ec: ExecutionContext =
+  private[this] val ec: ExecutionContext =
     ExecutionContext.fromExecutor(new Executor {
       override def execute(command: Runnable): Unit = command.run()
     })
 
-  private val finishedTimes = new mutable.Queue[Long]
-  private var inFlight = 0
-  private val pendingJobs = new mutable.Queue[Runnable]
+  private[this] val finishedTimes = new mutable.Queue[Long]
+  private[this] var inFlight = 0
+  private[this] val pendingJobs = new mutable.Queue[Runnable]
   // pendingJobs から取り出して実行するスケジュールは1つだけで十分
-  private var isScheduled = false
+  private[this] var isScheduled = false
 
   override def throttle[A](f: => Future[A]): Future[A] = synchronized {
     val now = clock.millis()
@@ -53,11 +53,11 @@ class ThrottleImpl(rate: ThrottleRate, clock: Clock, timer: Timer)
     }
   }
 
-  private def canStart = synchronized {
+  private[this] def canStart = synchronized {
     finishedTimes.length + inFlight < rate.n
   }
 
-  private def scheduleStart[A](now: Long) = synchronized {
+  private[this] def scheduleStart[A](now: Long) = synchronized {
     finishedTimes.headOption.foreach { oldestFinishedTime =>
       val scheduleTime = oldestFinishedTime + rate.span.toMillis
       timer.schedule(new TimerTask {
@@ -67,12 +67,12 @@ class ThrottleImpl(rate: ThrottleRate, clock: Clock, timer: Timer)
     }
   }
 
-  private def onScheduledTask(): Unit = synchronized {
+  private[this] def onScheduledTask(): Unit = synchronized {
     isScheduled = false
     startNextPendingJobs()
   }
 
-  private def startFuture[A](f: => Future[A]): Future[A] = synchronized {
+  private[this] def startFuture[A](f: => Future[A]): Future[A] = synchronized {
     inFlight += 1
 
     val result = f
@@ -80,18 +80,18 @@ class ThrottleImpl(rate: ThrottleRate, clock: Clock, timer: Timer)
     result
   }
 
-  private def removePastTimes(now: Long): Unit = synchronized {
+  private[this] def removePastTimes(now: Long): Unit = synchronized {
     val pastPoint = now - rate.span.toMillis
     while (finishedTimes.dequeueFirst(_ < pastPoint).isDefined) {}
   }
 
-  private def handleCompletion(): Unit = synchronized {
+  private[this] def handleCompletion(): Unit = synchronized {
     inFlight -= 1
     finishedTimes.enqueue(clock.millis())
     startNextPendingJobs()
   }
 
-  private def startNextPendingJobs(): Unit = synchronized {
+  private[this] def startNextPendingJobs(): Unit = synchronized {
     val now = clock.millis()
     removePastTimes(now)
     while (pendingJobs.nonEmpty && canStart) {
