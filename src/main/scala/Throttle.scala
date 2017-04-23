@@ -21,6 +21,7 @@ class ThrottleImpl(rate: ThrottleRate, clock: Clock, timer: Timer)
   private val finishedTimes = new mutable.Queue[Long]
   private var inFlight = 0
   private val pendingJobs = new mutable.Queue[Runnable]
+  // pendingJobs から取り出して実行するスケジュールは1つだけで十分
   private var isScheduled = false
 
   override def throttle[A](f: => Future[A]): Future[A] = synchronized {
