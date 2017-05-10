@@ -1,28 +1,14 @@
+package futurethrottle
+
 import java.time.Clock
-import java.util.concurrent.Executor
 import java.util.{Timer, TimerTask}
 
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.concurrent.duration.FiniteDuration
-
-trait Throttle {
-  def throttle[A](f: => Future[A]): Future[A]
-}
-
-case class ThrottleRate(n: Int, span: FiniteDuration) {
-  require(span.toMillis > 0,
-          "span must be equal or greater than 1 milli second")
-  require(n > 0, "n must be greater than 0")
-}
+import scala.concurrent.ExecutionContext.global
+import scala.concurrent.{Future, Promise}
 
 class ThrottleImpl(rate: ThrottleRate, clock: Clock, timer: Timer)
     extends Throttle {
-
-  private[this] val ec: ExecutionContext =
-    ExecutionContext.fromExecutor(new Executor {
-      override def execute(command: Runnable): Unit = command.run()
-    })
 
   private[this] val finishedTimes = new mutable.Queue[Long]
   private[this] var inFlight = 0
@@ -76,7 +62,7 @@ class ThrottleImpl(rate: ThrottleRate, clock: Clock, timer: Timer)
     inFlight += 1
 
     val result = f
-    result.onComplete(_ => handleCompletion())(ec)
+    result.onComplete(_ => handleCompletion())(global)
     result
   }
 

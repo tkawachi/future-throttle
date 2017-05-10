@@ -1,9 +1,11 @@
+package futurethrottle
+
 import java.time.Clock
 import java.util.Timer
 import java.util.concurrent.{Executors, ThreadFactory}
 
-import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.Random
 
 object TestMain extends App {
